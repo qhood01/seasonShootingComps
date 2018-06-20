@@ -1,0 +1,79 @@
+.libPaths(c("~/Documents/R",.libPaths()))
+library(rvest)
+library(magrittr)
+library(XML)
+library(jsonlite)
+library(rlist)
+##stats.df.16.17 <- readRDS("./data/shooting.16.17.rds")
+
+years <- 2005:2017
+player.urls <- c()
+names <- c()
+for (y in years) {
+    url <- paste0("https://www.basketball-reference.com/draft/NBA_",y,".html")
+    webpage <- read_html(url)
+
+    player.html <- webpage %>% html_nodes("table") %>% html_nodes("tr") %>% html_nodes("td") %>% html_nodes("a")
+    player.html.unique <- unique(player.html)
+    player.dictionary <- as.character(player.html)
+    player.dictionary <- unique(player.dictionary[grepl("players",player.dictionary)])
+    player.names <- unlist(lapply(player.dictionary, function(x) unlist(strsplit(x,">"))[2]))
+    player.names <- unlist(lapply(player.names, function(x) substr(x,1,nchar(x)-3)))
+
+    player.ids <- unlist(lapply(player.dictionary, function(x) unlist(strsplit(x,"/"))[4]))
+    player.ids <- unlist(lapply(player.ids, function(x) unlist(strsplit(x,"[.]"))[1]))
+
+    players <- data.frame(player.names, player.ids)
+    players$player.ids <- as.character(players$player.ids)
+
+    player.urls <- c(player.urls, paste0("https://www.basketball-reference.com/players/",
+                                         substr(player.ids,1,1), "/",
+                                         player.ids,
+                                         ".html"))
+    names <- c(names, player.names)
+}
+
+playerTotalsList <- list()
+playerAdvancedList <- list()
+playerShootingList <- list()
+i <- 1
+for (url in player.urls) {
+    print(i)
+    h <- read_html(url)
+    totals <- h %>% html_nodes(xpath = '//comment()') %>%    # select comment nodes
+        html_text() %>%    # extract comment text
+        paste(collapse = '') %>%    # collapse to a single string
+        read_html() %>%    # reparse to HTML
+        html_node('table#totals')
+    if (is.na(totals)) {
+        i <- i+1
+        next
+    } else {
+        totals <- html_table(totals)
+    }
+    advanced <- h %>% html_nodes(xpath = '//comment()') %>%    # select comment nodes
+        html_text() %>%    # extract comment text
+        paste(collapse = '') %>%    # collapse to a single string
+        read_html() %>%    # reparse to HTML
+        html_node('table#advanced') %>%    # select the desired table
+    html_table()
+    shooting <- h %>% html_nodes(xpath = '//comment()') %>%    # select comment nodes
+        html_text() %>%    # extract comment text
+        paste(collapse = '') %>%    # collapse to a single string
+        read_html() %>%    # reparse to HTML
+        html_node('table#shooting') %>%    # select the desired table
+    html_table()
+    ftp.games.minutes <- totals[,c("G","MP","FT%")]
+    ftr <- advanced[,c("FTr")]
+    index <- match("Career",shooting[,1])-1
+    shooting <- shooting[3:index,c(1:3,5,11:15,17:21)]
+    colnames(shooting) <- c("year","age","team","pos","perc.0.3","perc.3.10","perc.10.16","perc.16.3","perc.3",
+                            "0.3.perc","3.10.perc","10.16.perc","16.3.perc","3.perc")
+    playerTotalsList[[names[[i]]]] <- ftp.games.minutes
+    playerAdvancedList[[names[[i]]]] <- ftr
+    playerShootingList[[names[[i]]]] <- shooting
+    i <- i+1
+}
+list.save(playerShootingList,"./shootingComparison.rds")
+list.save(playerAdvancedList,"./advancedComparison.rds")
+
